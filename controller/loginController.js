@@ -3,7 +3,7 @@ const router = express.Router();
 const { set,ref,get,update,remove } = require('firebase/database');
 const db = require('../config/connectFirebase');
 
-router.post("/login", function(req, res, next) {
+router.post("/login", function(req, res) {
   try {
     var username = req.body.username;
     var password = req.body.password;
@@ -37,7 +37,7 @@ router.post("/login", function(req, res, next) {
   }
 });
 
-router.get("/account", function(req, res, next) {
+router.get("/account", function(req, res) {
   try {
     get(ref(db, "users"))
       .then((result) => {
