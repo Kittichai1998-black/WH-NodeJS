@@ -3,7 +3,37 @@ const router = express.Router();
 const { set, ref, get, update, remove } = require("firebase/database");
 const db = require("../config/connectFirebase");
 
+const request = require("request");
+
+function lineNotify(text) {
+  const url_line_notification = "https://notify-api.line.me/api/notify";
+  const token = "Rev9spbvuB85s71VlNjIrj7tYSY1aRNszAkiDqO8Jui";
+  request(
+    {
+      method: "POST",
+      uri: url_line_notification,
+      header: {
+        "Content-Type": "multipart/form-data",
+      },
+      auth: {
+        bearer: token,
+      },
+      form: {
+        message: text,
+      },
+    },
+    (err, httpResponse, body) => {
+      if (err) {
+        console.log(err);
+      } else {
+        console.log(body);
+      }
+    }
+  );
+}
+
 router.post("/stock", (req, res) => {
+  var ID = req.body.ID;
   var ProductID = req.body.ProductID;
   var Branch = req.body.Branch;
   var ProductName = req.body.ProductName;
@@ -18,7 +48,7 @@ router.post("/stock", (req, res) => {
   var UpdateBy = req.body.UpdateBy;
 
   try {
-    set(ref(db, "product/stock1/" + ProductName), {
+    set(ref(db, "product/stock1/" + ID), {
       ProductID: ProductID,
       Branch: Branch,
       ProductName: ProductName,
@@ -72,8 +102,36 @@ router.get("/stock", (req, res) => {
   }
 });
 
-router.put("/stock", (req, res) => {
-  var ProductName = req.body.ProductName;
+router.put("/stock/addstock", (req, res) => {
+  var ID = req.body.ID;
+  var UnitsOnOrder = req.body.UnitsOnOrder;
+  var UpdateBy = req.body.UpdateBy;
+
+  try {
+    var updates = {};
+    updates[`product/stock1/${ID}/UnitsOnOrder`] = UnitsOnOrder;
+    updates[`product/stock1/${ID}/UpdateBy`] = UpdateBy;
+    updates[`product/stock1/${ID}/LastUpdate`] = new Date() + "";
+
+    update(ref(db), updates)
+      .then(() => {
+        return res.status(200).json({
+          statusCode: 200,
+          message: "success"
+        });
+      })
+      .catch((error) => {
+        return res.status(400).json({ statusCode: 400, message: error.message });
+      });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ statusCode: 500, message: error.message });
+  }
+
+});
+
+router.put("/stock/checkstock", (req, res) => {
+  var ID = req.body.ID;
   var UnitsOnOrder = req.body.UnitsOnOrder;
   var UpdateBy = req.body.UpdateBy;
 
@@ -83,8 +141,9 @@ router.put("/stock", (req, res) => {
 
     var unitsInStock = 0;
     var maximumUnits = 0;
+    var LineMessage = "";
     //check stock1
-    get(ref(db, "product/stock1/" + ProductName)).then((snapshot) => {
+    get(ref(db, "product/stock1/" + ID)).then((snapshot) => {
       if (snapshot.exists()) {
         unitsInStock = snapshot.val().UnitsInStock;
         maximumUnits = snapshot.val().MaximumUnits;
@@ -92,10 +151,11 @@ router.put("/stock", (req, res) => {
         console.log("maximumUnits = " + maximumUnits);
 
         if (unitsInStock >= maximumUnits) {
+          LineMessage = ID +":"+ " Units full stock";
+          lineNotify(LineMessage)
           return res.status(200).json({
             statusCode: 400,
-            message: ProductName + " Units full stock",
-            result: "",
+            message: ID + " Units full stock"
           });
         }
       }
@@ -104,8 +164,9 @@ router.put("/stock", (req, res) => {
     var WHResultUnits = 0;
     var WHUnitsInStock = 0;
     var WHUnitsOnOrder = 0;
+    
     //check warehouse
-    get(ref(db, "product/warehouse/" + ProductName)).then((snapshot) => {
+    get(ref(db, "product/warehouse/" + ID)).then((snapshot) => {
       if (snapshot.exists()) {
         WHUnitsInStock = snapshot.val().UnitsInStock;
         WHUnitsOnOrder = snapshot.val().UnitsOnOrder;
@@ -120,18 +181,18 @@ router.put("/stock", (req, res) => {
         if (WHResultUnits > 0 && UnitsOnOrder <= WHResultUnits) {
           //update warehouse
           var wh_updates = {};
-          wh_updates[`product/warehouse/${ProductName}/UnitsOnOrder`] =
+          wh_updates[`product/warehouse/${ID}/UnitsOnOrder`] =
             UnitsOnOrder + WHUnitsOnOrder;
-          wh_updates[`product/warehouse/${ProductName}/UpdateBy`] = UpdateBy;
-          wh_updates[`product/warehouse/${ProductName}/LastUpdate`] =
+          wh_updates[`product/warehouse/${ID}/UpdateBy`] = UpdateBy;
+          wh_updates[`product/warehouse/${ID}/LastUpdate`] =
             new Date() + "";
 
           //update stock1
           var st_updates = {};
-          st_updates[`product/stock1/${ProductName}/UnitsInStock`] =
+          st_updates[`product/stock1/${ID}/UnitsInStock`] =
             unitsInStock + UnitsOnOrder;
-          st_updates[`product/stock1/${ProductName}/UpdateBy`] = UpdateBy;
-          st_updates[`product/stock1/${ProductName}/LastUpdate`] =
+          st_updates[`product/stock1/${ID}/UpdateBy`] = UpdateBy;
+          st_updates[`product/stock1/${ID}/LastUpdate`] =
             new Date() + "";
 
           update(ref(db), wh_updates)
@@ -143,11 +204,12 @@ router.put("/stock", (req, res) => {
                   isSTUpdate = true;
 
                   if (isWSUpdate == true && isSTUpdate == true) {
+                    LineMessage = ID + " ถูกเพิ่มจำนวน :"+ WHUnitsOnOrder +"\n"+"คงเหลือจำนวน : " + WHUnitsInStock;
+                    lineNotify(LineMessage)
                     return res.status(200).json({
                       statusCode: 200,
                       message: "success",
-                      result:
-                        "Unit " + ProductName + "Order Insert Success",
+                      result: "Unit " + ID + "Order Insert Success",
                     });
                   } else {
                     return res.status(400).json({
@@ -172,9 +234,11 @@ router.put("/stock", (req, res) => {
                 .json({ statusCode: 400, message: error.message });
             });
         } else {
+          LineMessage = ID + " Warehouse Out of stock";
+          lineNotify(LineMessage)
           return res.status(200).json({
             statusCode: 400,
-            message: "Units " + ProductName + " Warehouse Out of stock",
+            message: "Units " + ID + " Warehouse Out of stock",
             result: "",
           });
         }
@@ -186,10 +250,38 @@ router.put("/stock", (req, res) => {
   }
 });
 
-router.delete("/stock", (req, res) => {
-  var ProductName = req.body.ProductName;
+router.put("/stock/editday", (req, res) => {
+  var ID = req.body.ID;
+  var Day = req.body.Day;
+  var UpdateBy = req.body.UpdateBy;
+
   try {
-    remove(ref(db, "product/stock1/" + ProductName))
+    var updates = {};
+    updates[`product/stock1/${ID}/Day`] = Day;
+    updates[`product/stock1/${ID}/UpdateBy`] = UpdateBy;
+    updates[`product/stock1/${ID}/LastUpdate`] = new Date() + "";
+
+    update(ref(db), updates)
+      .then(() => {
+        return res.status(200).json({
+          statusCode: 200,
+          message: "success"
+        });
+      })
+      .catch((error) => {
+        return res.status(400).json({ statusCode: 400, message: error.message });
+      });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ statusCode: 500, message: error.message });
+  }
+
+});
+
+router.delete("/stock", (req, res) => {
+  var ID = req.body.ID;
+  try {
+    remove(ref(db, "product/stock1/"+ID))
       .then(() => {
         return res.status(200).json({
           statusCode: 200,

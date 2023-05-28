@@ -16,7 +16,7 @@ app.use('/api', loginController);
 app.use('/api', warehouseController);
 app.use('/api', stockController);
 
-const PORT = 8089;
+const PORT = 8091;
 app.listen(PORT, () => {
     console.log('Server is running on port :' + PORT);
 });
